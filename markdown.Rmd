@@ -1,0 +1,1275 @@
+---
+title: "Final Project (Phase 02): Predicting the Life Expectancy for WHO"
+author: "By Ahmad Hussein, Mahmoud Joumaa, & Rami Abou Fakhr"
+date: "December 2023"
+output:
+  html_document:
+    theme: readable
+    highlight: espresso
+    number_sections: no
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+---
+
+In recent years, the World Health Organization (WHO) has become fond of machine learning and sees this field as a valuable asset to help maintain a high level of control over world countries by being able to accurately predict any country's life expectancy for any given year.
+
+For classified reasons, WHO has reached out to our team in hopes of developing ML models that can fulfill this organization's needs and desires. It is up to us to choose the correct data set, explore the various features involved, develop accurate predictive models, and provide an insightful interpretation of the results of these models to help WHO understand the implications provided by every model.
+
+# Library Imports
+
+Before presenting our results, we have gathered all the utilized libraries in the following code block to facilitate the process of going through our report:
+```{r collapse=TRUE}
+suppressWarnings(suppressMessages(try(library(corrplot), silent=TRUE)))
+suppressWarnings(suppressMessages(try(library(ggplot2), silent=TRUE)))
+suppressWarnings(suppressMessages(try(library(patchwork), silent=TRUE)))
+suppressWarnings(suppressMessages(try(library(caret), silent=TRUE)))
+suppressWarnings(suppressMessages(try(library(e1071), silent=TRUE)))
+suppressWarnings(suppressMessages(try(library(party), silent=TRUE)))
+suppressWarnings(suppressMessages(try(library(randomForest), silent=TRUE)))
+suppressWarnings(suppressMessages(try(library(xgboost),silent=TRUE)))
+```
+
+# The Data Set
+
+## Selection Process
+
+Out of all the options explored, we have come to the consensus on the following data set:
+
+```{r collapse=TRUE}
+data <- read.csv("Raw_Data.csv")
+```
+
+We saw this data set fit for our project as it holds many diverse features (20+) that may have an impact on a country's life expectancy as well as more than 9000 observations to report. These conditions provide an optimal environment for the development of sophisticated ML models for our purpose.
+
+The features of this data set are:
+
+`Unemployment`
+
+`Infant Mortality`: infant death
+
+`GDP`: Gross Domestic Product; measure of the total economic output of a country
+
+`GNI`: Gross National Income; measure of total income earned by country residents
+
+`Clean fuels and cooking technologies`
+
+`Per Capita`: Income per individual
+
+`Mortality caused by road traffic injury`
+
+`Tuberculosis Incidence`: type of lung infection
+
+`DPT Immunization`: Diphtheria, Pertussis (whooping cough), and Tetanus immunization
+
+`HepB3 Immunization`: Hepatitis B3 immunization
+
+`Measles Immunization`
+
+`Hospital beds`
+
+`Basic sanitation services`
+
+`Tuberculosis treatment`
+
+`Urban population`: High population density
+
+`Rural population`: Low population density
+
+`Non-communicable Mortality`: Non-infectious diseases that cause death
+
+`Suicide Rate`
+
+## Data Preprocessing & Exploration
+
+### Initial Feature Selection
+
+To start things off, we have decided to exclude `Country`, `Gender`, and `Year` from our data set.
+
+```{r collapse=TRUE}
+data <- data[, -which(names(data) %in% c("Country", "Year", "Gender"))]
+```
+
+An explanation would be, firstly, we want our models to avoid any bias when predicting the life expectancy of any country, meaning that we do not want the country's name to play any role in providing the prediction.
+
+Secondly, the average difference in life expectancy between males and females is slim. Therefore, to avoid any unnecessary complications, we opted for gender neutral models in prediction.
+
+Thirdly, we excluded the year because we want our model to be able to perform life expectancy predictions based on the country's features, regardless of the year.
+
+### Correlation Matrix
+
+To start things off, we have decided to visualize the raw data set in the form of a correlational matrix in order to better understand our features and hypothesize the correlational power of each with life expectancy.
+
+Note: The only reason we performed the correlation matrix before the other plots is because the matrix cannot be generated after binning of life expectancy data takes place.
+
+```{r collapse=TRUE}
+# store the correlation matrix which is returned by the cor() function 
+correlation_matrix <- cor(data)
+
+correlation_matrix
+
+#use the corrplot() function from the corrplot library to plot the correlation matrix
+corrplot(correlation_matrix, method = "color", type = "upper", tl.col = "black", tl.srt = 45, tl.cex = 0.6)
+```
+
+From this matrix, we can observe the impact of every feature on the response (life expectancy) as well as on the other features. The majority of features show a strong correlation with life expectancy (absolutely >0.5) with the weak features being `unemployment`, `GDP`, `GNI`, `HepB3 immunization`, `hospital beds`, `tuberculosis treatment`, and `suicide rate`. This insight could help us optimize our models and avoid any overfitting situations by possibly excluding these features.
+
+### Binning
+
+We then proceeded to bin the life expectancy data into categories to better handle this data when visualizing the data and developing our models.
+
+Our Presumptions:
+
+`Incredibly Low` ranges from 0->50
+
+`Very Low` ranges from 50->55
+
+`Low` ranges from 55->60
+
+`Below Average` ranges from 60->65
+
+`Average` ranges from 65->70
+
+`Above Average` ranges from 70->75
+
+`High` ranges from 75->80
+
+`Very High` ranges from 80->85
+
+`Incredibly High` ranges from 85->Any
+
+```{r collapse=TRUE}
+# Bin the Life Expectancy data into different categories
+# 1 -> Incredibly Low
+# 2 -> Very Low
+# 3 -> Low
+# 4 -> Below Average
+# 5 -> Average
+# 6 -> Above Average 
+# 7 -> High
+# 8 -> Very High
+# 9 -> Incredibly High
+breaks <- c(0, 50, 55, 60, 65, 70, 75, 80, 85, Inf)
+data$Life.expectancy <- cut(data$Life.expectancy, breaks = breaks, labels = 1:9, include.lowest = TRUE)
+```
+
+### Scatter Plot
+
+To better visualize the output of the correlation matrix, we generated a scatter plot for life expectancy against each feature which showed high correlational power with it by first creating a function `create_scatter_plot()`.
+
+```{r collapse=TRUE}
+# Function to create scatter plot
+create_scatter_plot <- function(data, x_var, y_var, color_var) {
+  ggplot(data, aes(x =!!rlang::sym(x_var), y = !!rlang::sym(y_var), color = !!rlang::sym(color_var))) +
+    geom_point() +
+    labs(title = paste(y_var, "vs", x_var),
+         x = x_var, y = y_var, color = color_var) +
+   # scale_y_discrete(labels = c("Incredibly Low", "Very Low", "Low", "Below Average", "Average", "Above Average", "High", "Very High", "Incredibly High")) +
+    scale_y_discrete(labels = c("", "", "", "", "", "", "", "", "")) +
+    
+    scale_color_discrete(labels = c("Incredibly Low", "Very Low", "Low", "Below Average", "Average", "Above Average", "High", "Very High", "Incredibly High")) +
+    theme(plot.title = element_text(size = 12))
+}
+
+plot1 <- create_scatter_plot(data, "Clean.fuels.and.cooking.technologies", "Life.expectancy", "Life.expectancy")
+
+plot2 <- create_scatter_plot(data, "Per.Capita", "Life.expectancy", "Life.expectancy")
+
+plot3 <- create_scatter_plot(data, "Mortality.caused.by.road.traffic.injury", "Life.expectancy", "Life.expectancy")
+
+plot4 <- create_scatter_plot(data, "Tuberculosis.Incidence", "Life.expectancy", "Life.expectancy")
+
+plot5 <- create_scatter_plot(data, "DPT.Immunization", "Life.expectancy", "Life.expectancy")
+
+plot6 <- create_scatter_plot(data, "Measles.Immunization", "Life.expectancy", "Life.expectancy")
+
+plot7 <- create_scatter_plot(data, "Basic.sanitation.services", "Life.expectancy", "Life.expectancy")
+
+plot8 <- create_scatter_plot(data, "Urban.population", "Life.expectancy", "Life.expectancy")
+
+plot9 <- create_scatter_plot(data, "Rural.population", "Life.expectancy", "Life.expectancy")
+
+plot10 <- create_scatter_plot(data, "Non.communicable.Mortality", "Life.expectancy", "Life.expectancy")
+
+plot11 <- create_scatter_plot(data, "Infant.Mortality", "Life.expectancy", "Life.expectancy")
+
+subplot1 <- plot1 + plot2 + plot_layout(ncol = 2, nrow = 1)
+subplot2 <- plot3 + plot4 + plot_layout(ncol = 2, nrow = 1)
+subplot3 <- plot5 + plot6 + plot_layout(ncol = 2, nrow = 1)
+subplot4 <- plot7 + plot8 + plot_layout(ncol = 2, nrow = 1)
+subplot5 <- plot9 + plot10 + plot_layout(ncol = 2, nrow = 1)
+```
+
+```{r collapse=TRUE}
+subplot1
+subplot2
+subplot3
+subplot4
+subplot5
+```
+
+We can observe from these scatter plots the existence of a strong correlation between life expectancy and the feature of concern, in consistency with the correlation matrix. For instance, in `subplot1`, we can see a positive linear correlation; as `Per capita` increases, `life expectancy` also increases. On the contrary, in `subplot2`, `life expectancy` tends to decrease as `tuberculosis incidence` cases increase, revealing a strong negative correlation between the 2 variables.
+
+### Bar Plot
+
+We also decided to generate a bar plot to observe how life expectancy varies across the world:
+
+```{r collapse=TRUE}
+# Draw a bar Plot showing the count of each category 
+ggplot(data, aes(x = Life.expectancy, fill = Life.expectancy)) +
+  geom_bar(color = "white") +
+  labs(title = "Life Expectancy", x = "Life Expectancy", y = "Count") +
+  scale_x_discrete(labels = c("", "", "", "", "", "", "", "", "")) +
+  scale_fill_discrete(labels = c("Incredibly Low", "Very Low", "Low", "Below Average", "Average", "Above Average", "High", "Very High", "Incredibly High"))
+
+```
+
+From this bar plot, we can see that most countries express a the high life expectancy (75 to 85 years of age range), leaving us with a Left-skewed form of a curve.
+
+### Data Standardization
+
+Now that we graphically explored our data, we proceeded to further process our data set before initiating model development.
+
+We first did that by standardizing our data via z-score normalization. This can be useful for many reasons, including: better scaling of the data, better performance of our models, improving convergence to find the optimal solution, and facilitating interpretability.
+
+```{r collapse=TRUE}
+data[, -1] <- as.data.frame(scale(data[, -1]))
+```
+
+# Feature Engineering: PCA
+
+After handling the data set, we used PCA (Principle Component Analysis) as our dimensionality reduction technique by essentially grouping the closely-related features into a single component which can mainly help in reducing the overfitting phenomenon exhibited when numerous features are used, as well as reducing multicollinearity among features which can hinder the performance of our models.
+
+```{r collapse=TRUE}
+# Perform PCA
+pca_result <- prcomp(data[, -1], scale. = TRUE)
+```
+We were keen to explore how much variance every principle component explained.
+
+That is why we built a graph that would show this as well as the cumulative explained variance which is a contribution of all the principle components combined together.
+
+```{r collapse=TRUE}
+# Extract the proportion of variance explained by each PC
+percentage_variance_explained <- (pca_result$sdev^2 / sum(pca_result$sdev^2))*100
+
+# Get the cumulative sum of the variance explanation
+cumulative_variance <- cumsum(percentage_variance_explained)
+
+
+# Plot the variance explanations for the different PCs
+ggplot() +
+  geom_line(aes(x = 1:length(percentage_variance_explained), y = percentage_variance_explained, color = "Variance Explained"), linewidth=1) +
+  geom_point(aes(x = 1:length(percentage_variance_explained), y = percentage_variance_explained, color = "Variance Explained"), size = 3) +
+  geom_line(aes(x = 1:length(percentage_variance_explained), y = cumulative_variance, color = "Cumulative Variance Explained"), linewidth=1) +
+  geom_point(aes(x = 1:length(percentage_variance_explained), y = cumulative_variance, color = "Cumulative Variance Explained"), size = 3) +
+  geom_text(aes(x = 1:length(percentage_variance_explained), y = percentage_variance_explained, label = round(percentage_variance_explained, 1)),
+            vjust = -0.5, color = "red", size = 2.75) +
+  geom_text(aes(x = 1:length(percentage_variance_explained), y = cumulative_variance, label = round(cumulative_variance, 1)),
+            vjust = -0.5, color = "blue", size = 2.75) +
+  labs(title = "PCA Variance Explanations",
+       x = "Principal Component",
+       y = "Variance Explained") +
+  scale_color_manual(values = c("blue", "red"), 
+                     labels = c("Cumulative Variance Explained", "Variance Explained"))
+```  
+
+Finally, we present a summary of the PCA:
+
+```{r collapse=TRUE}
+summary(pca_result)
+```
+
+Here, we agreed on choosing the first 9 principle components since they explain 90% of the variance in the data set (we deemed this cut-off fit for our purposes).
+
+```{r collapse=TRUE}
+# Get the first 9 PCs
+pcs <- pca_result$x[, 1:9]
+
+new_data = cbind(data[, 1], pcs)
+colnames(new_data)[1] <- "Life.expectancy"
+```
+
+Below are a few rows of the new data after all is done with PCA.
+
+```{r collapse=TRUE}
+# Display the first few rows of the updated data
+head(new_data)
+```
+
+# Splitting The Data
+
+In this part, we wanted to split the data into a training set and a test set.
+
+We first set a seed to ensure reproducibility of random processes which is crucial for sharing and validating results.
+
+```{r collapse=TRUE}
+# Set a seed for reproducibility
+set.seed(5)
+```
+
+Then, we proceed to shuffle the data and split our data between training and testing.
+
+We shuffle the data to avoid any bias in our training and test sets.
+
+```{r collapse=TRUE}
+# Shuffle the data
+shuffled_data <- new_data[sample(nrow(new_data)), ]
+
+# Convert shuffled_data to a data frame
+shuffled_data <- as.data.frame(shuffled_data)
+
+# Split the data into training (80%) and testing (20%) sets
+train_index <- createDataPartition(shuffled_data$Life.expectancy, p = 0.8, list = FALSE)
+train_data <- shuffled_data[train_index, ]
+test_data <- shuffled_data[-train_index, ]
+```
+
+# Model Development
+
+Once the previously described stages of data exploration and processing were complete, we started implementing and testing different classification models, both supervised and unsupervised.
+
+As we'll be computing the following metrics for all models so we can form a better interpretation once we compare the corresponding results, we opted to have a callable function to ease the process of re-usability:
+- Accuracy: The ratio of correctly classified observations `= (TP+TN)/Total`
+- Precision: The ratio of correct positive predictions to the overall number of positive predictions `= TP/(TP+FP)`
+- Recall: The ratio of correct positive predictions to the overall number of positive observations `= TP/(TP+FN)`
+- F1 Score: The harmonic mean of precision and recall ```= 2*(Precision*Recall)/(Precision+Recall)`
+where `- TP is the number of True Positives`
+      `- FP is the number of False Positives`
+      `- TN is the number of True Negatives`
+      `- FN is the number of False Negatives`
+      `- Total is the number of Total observations`
+```{r collapse=TRUE}
+calculate_metrics <- function(model, test_data, round=TRUE) {
+  predictions <- predict(model, test_data)
+  if (round == TRUE)
+    predictions <- round(predictions)
+  
+  # Explicitly set levels to handle cases where some classes may not be present
+  levels <- unique(c(predictions, test_data$Life.expectancy))
+  predictions <- factor(predictions, levels = levels)
+  actual_labels <- factor(test_data$Life.expectancy, levels = levels)
+  
+  conf_matrix <- confusionMatrix(predictions, actual_labels)
+  
+  accuracy <- conf_matrix$overall["Accuracy"]
+  
+  precision <- conf_matrix$byClass[,"Precision"]
+  recall <- conf_matrix$byClass[,"Sensitivity"]
+  f1_score <- conf_matrix$byClass[,"F1"]
+  
+  # Calculate macro-averages
+  macro_precision <- mean(precision, na.rm = TRUE)
+  macro_recall <- mean(recall, na.rm = TRUE)
+  macro_f1_score <- mean(f1_score, na.rm = TRUE)
+  
+  # Return the metrics without any prefix
+  return(c(accuracy, precision = macro_precision, recall = macro_recall, f1_score = macro_f1_score))
+}
+
+```
+
+Note that for the following code chunks, a lot of randomness is involved. Thus, we'll be setting a global seed to achieve consistency across our different runs for demonstration purposes when presenting the report.
+```{r collapse=TRUE}
+set.seed(24)
+```
+
+## Supervised Learning
+
+For supervised learning models, we opted for decision trees (which could be more easily described and presented to a non-expert in the field of machine learning) and support vector machine (SVM) extended to handle the classification of more than two classes through various kernels using different values of gamma, degree, and cost.
+
+### Decision Trees
+
+Simple decision trees are, as their name suggests, rather simple to interpret and present to someone who isn't a professional in the field of Machine Learning. However, simple decision trees tend to lack enough predictive power when compared to other models, which is why we have extended their capabilities using ensemble methods (Bagging, Random Forest, and Boosting) as well as analyzing the results of pruned against un-pruned trees.
+
+```{r collapse=TRUE}
+# get number of features in the dataset
+num_features <- ncol(train_data) - 1
+```
+
+#### Simple Decision Tree
+
+The first model we implemented was a simple decision tree. Further adjustments would then be applied to improve different aspects (such as the model's predictive power) via various ensemble methods.
+```{r collapse=TRUE}
+# Fit Normal Decision tree model
+score_data_tree <- data.frame()
+
+
+# Create the normal decision tree model
+tree_model <- ctree(Life.expectancy ~ ., data = train_data)
+
+
+# Calculate metrics for the normal tree model
+metrics_normal <- calculate_metrics(tree_model, test_data)
+
+metrics_normal
+
+# Append results to the data frame
+score_data_tree <- rbind(score_data_tree, data.frame(
+  tree_type = "Normal",
+  metric_type = rep(c("Accuracy", "precision", "recall", "f1_score"), each = 1),
+  metric_value = rep(metrics_normal, each = 1)
+))
+```
+
+To form a more accurate idea of the evaluated results, the different metric scores are graphed below, showing an accuracy rate of 66.3% and F1 score of 64.5%.
+```{r collaspe=TRUE}
+ggplot(score_data_tree, aes(x = tree_type, y = metric_value, fill = tree_type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(x = tree_type, y = metric_value, label = sprintf("%.3f", metric_value)), 
+            position = position_dodge(width = 0.9), vjust = -0.5, inherit.aes = FALSE) +
+  labs(title = "Model Evaluation Metrics - Comparing the different tree metrics", x = "Tree Type", y = "Metric Value") +
+  theme_minimal() +
+  facet_wrap(~metric_type, scales = "free_y", strip.position = "bottom") +
+  coord_cartesian(ylim = c(0, 1))
+```
+A simple decision tree model shows an accuracy of 66.3% and F1 score of 64.5%, which are considered relatively low compared to other models. However, ensemble methods address this issue via different approaches described in the following sections.
+
+The resulting tree is also visualized in the following code chunk. Given the depth of the tree, the visualization is only provides a broad overview of the tree's structure rather than explicit details at every node or branch.
+```{r collapse=TRUE}
+# Visualize the Decision Tree
+plot(tree_model, main = "Conditional Inference Tree Visualization", gp = gpar(cex = 0.1))
+```
+
+##### Pruning the Tree
+
+Our first attempt at improving our tree's accuracy is to apply pruning so the excess splits lead to a lower variance and better interpretation despite the slightly increased bias.
+Typically, cross-validation would be used to test the different pruning combinations. However, after testing different cross-validation methods and built-in functions, we noticed that none of the used calls had finished execution after 2 hours of running 5-fold cross-validation.
+Thus, we opted to test different complexities when pruning the tree and compared the different evaluated metrics for each complexity.
+
+```{r collapse=TRUE}
+# Create the pruned decision tree model
+
+# keep track of the best f1_score to compare later
+best_f1_prune <- NULL
+best_f1_value <- -1
+
+# create a dataframe to store the metric values
+score_data_prune <- data.frame()
+
+# define the different complexity values
+used_complexity <- c(0.6, 0.7, 0.8, 0.85, 0.9, 0.95)
+
+# Loop over the different complexity values
+for (comp in used_complexity) {
+  # Train the pruned tree model
+  pruned_model <- ctree(Life.expectancy ~ ., data = train_data, controls = ctree_control(mincriterion = comp))
+  
+  # Calculate metrics for the pruned model
+  metrics_prune <- calculate_metrics(pruned_model, test_data)
+  
+  # Append results to the data frame
+  score_data_prune <- rbind(score_data_prune, data.frame(
+    complexity = as.factor(comp),
+    metric_type = names(metrics_prune),
+    metric_value = metrics_prune
+  ))
+  
+  # Check if F1 score is better than the current best
+  f1_score_value <- metrics_prune["f1_score"]
+  if (length(f1_score_value) > 0 && f1_score_value > best_f1_value) {
+    best_f1_prune <- pruned_model
+    best_f1_value <- f1_score_value
+  }
+}
+
+# Add the model with best F1 to the data frame
+metrics_best_f1_prune <- calculate_metrics(best_f1_prune, test_data)
+score_data_tree <- rbind(score_data_tree, data.frame(
+  tree_type = "Prune",
+  metric_type = names(metrics_best_f1_prune),
+  metric_value = metrics_best_f1_prune
+))
+
+
+# Create separate bar graph for each metric
+ggplot(score_data_prune, aes(x = complexity, y = metric_value, fill = complexity)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(x = complexity, y = metric_value, label = sprintf("%.3f", metric_value)), 
+            position = position_dodge(width = 0.9), vjust = -0.5, inherit.aes = FALSE) +
+  labs(title = "Model Evaluation Metrics - Prune Tree with different Pruning values", x = "complexity", y = "Metric Value") +
+  theme_minimal() +
+  facet_wrap(~metric_type, scales = "free_y", strip.position = "bottom") +
+  coord_cartesian(ylim = c(0, 1))
+```
+The graphed results show maximum values for both accuracy and F1 score of 68% and 66.5% respectively when the tree's complexity is at the minimum tested value of 0.6. Both metrics reveal an improvement over the un-pruned simple tree.
+
+#### Ensemble Methods
+
+In an attempt to further increase our model's predictive power, we started augmenting our decision tree using various ensemble methods, including bagging, random forest, and, finally, boosting.
+
+Note that, for these sub-sections, we opted for bar graphs instead of line charts because it was too computationally straining to run all models within the desired range, so we only tested a few selected models.
+
+##### Bagging
+
+The first ensemble method we tried is bagging. As the name suggests, we aggregated the results from different bootstrap samples and averaged them out to reduce the variance of the tree, consequently reducing the probability of over-fitting our training data.
+```{r collapse=TRUE}
+# Create the bagging decision tree model
+
+# keep track of the best f1_score to compare later
+best_f1_bag <- NULL
+best_f1_value <- -1
+
+# create a data frame to keep track of the metrics for each model
+score_data_bag <- data.frame()
+
+# define the different tree numbers we want to try
+tree_nums <- c(1, 5, 10, 50, 100, 200, 500)
+
+# loop over the different tree numbers
+for (tree_num in tree_nums) {
+  # Train the bagging tree model
+  bagging_model <- randomForest(Life.expectancy ~ ., data = train_data, mtry= num_features, ntree = tree_num)
+  
+  # Calculate metrics for the bagging model
+  bagging_metrics <- calculate_metrics(bagging_model, test_data)
+  
+  # Append results to the data frame
+  score_data_bag <- rbind(score_data_bag, data.frame(
+    tree_num = as.factor(tree_num),
+    metric_type = names(bagging_metrics),
+    metric_value = bagging_metrics
+  ))
+  
+  # Check if F1 score is better than the current best
+  f1_score_value <- bagging_metrics["f1_score"]
+  if (length(f1_score_value) > 0 && f1_score_value > best_f1_value) {
+    best_f1_bag <- bagging_model
+    best_f1_value <- f1_score_value
+  }
+}
+
+# Add the model with best F1 to the data frame
+metrics_best_f1_bag <- calculate_metrics(best_f1_bag, test_data)
+score_data_tree <- rbind(score_data_tree, data.frame(
+  tree_type = "Bag",
+  metric_type = names(metrics_best_f1_bag),
+  metric_value = metrics_best_f1_bag
+))
+
+
+# Create separate bar graph for each metric
+ggplot(score_data_bag, aes(x = tree_num, y = metric_value, fill = tree_num)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(x = tree_num, y = metric_value, label = sprintf("%.3f", metric_value)), 
+            position = position_dodge(width = 0.9), vjust = -0.5, inherit.aes = FALSE) +
+  labs(title = "Model Evaluation Metrics - Bagging with Different Number of Trees", x = "Number of Trees", y = "Metric Value") +
+  theme_minimal() +
+  facet_wrap(~metric_type, scales = "free_y", strip.position = "bottom") +
+  coord_cartesian(ylim = c(0, 1))
+```
+The above graphs show the highest accuracy and F1 score at 500 averaged trees of 79.9% and 78.4%, respectively, which is expected since less over-fitting occurs as more trees are averaged out (variance is greatly reduced at the cost of slightly increasing bias). These metrics both show a significant improvement over the pruned tree's results.
+
+##### Random Forest
+
+Random forest is an extension over bagging. Bagging chooses random observations (with repetition) and runs the model on that subset of observations. Random forest also randomly chooses a certain number of features (without repetition) such that the different resulting trees that are averaged out at the end are more de-correlated.
+
+When setting the number of random features to be selected, we could choose them all, but then the results would be identical to those of bagging as bagging is just a special case of random forest where all features are selected. We tested random forest on two subset sizes: the first being the base 2 logarithmic of the total feature space size and the other its square root value.
+
+We first tested the logarithmic random forest.
+```{r collapse=TRUE}
+# Create the Log Random Forest model
+
+
+
+# keep track of the best f1_score to compare later
+best_f1_forest_log <- NULL
+best_f1_value <- -1
+
+# create a data frame to keep track of the metrics for each model
+score_data_forest_log <- data.frame()
+
+# define the different tree numbers we want to try
+tree_nums <- c(1, 5, 10, 50, 100, 200, 500)
+
+# loop over the different tree numbers
+for (tree_num in tree_nums) {
+  # Train the Log Random Forest Model
+  forest_log_model <- randomForest(Life.expectancy ~ ., data = train_data, mtry= log2(num_features), ntree = tree_num)
+  
+  # Calculate metrics for the Random Forest model
+  forest_log_metrics <- calculate_metrics(forest_log_model, test_data)
+  
+  # Append results to the data frame
+  score_data_forest_log <- rbind(score_data_forest_log, data.frame(
+    tree_num = as.factor(tree_num),
+    metric_type = names(forest_log_metrics),
+    metric_value = forest_log_metrics
+  ))
+  
+  # Check if F1 score is better than the current best
+  f1_score_value <- forest_log_metrics["f1_score"]
+  if (length(f1_score_value) > 0 && f1_score_value > best_f1_value) {
+    best_f1_forest_log <- forest_log_model
+    best_f1_value <- f1_score_value
+  }
+}
+
+# Add the model with best F1 to the data frame
+metrics_best_f1_forest_log <- calculate_metrics(best_f1_forest_log, test_data)
+score_data_tree <- rbind(score_data_tree, data.frame(
+  tree_type = "Forest_Log",
+  metric_type = names(metrics_best_f1_forest_log),
+  metric_value = metrics_best_f1_forest_log
+))
+
+
+# Create separate bar graphs using ggplot2 for each metric
+ggplot(score_data_forest_log, aes(x = tree_num, y = metric_value, fill = tree_num)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(x = tree_num, y = metric_value, label = sprintf("%.3f", metric_value)), 
+            position = position_dodge(width = 0.9), vjust = -0.5, inherit.aes = FALSE) +
+  labs(title = "Model Evaluation Metrics - Random Forest with log(num of features) with different Number of Trees", x = "Number of Trees", y = "Metric Value") +
+  theme_minimal() +
+  facet_wrap(~metric_type, scales = "free_y", strip.position = "bottom") +
+  coord_cartesian(ylim = c(0, 1))
+```
+The resulting graphs reveal an accuracy of 80.5% and an F1 score of 78% as they both start to plateau. Both metrics' results show an improvement over those of bagging.
+
+We then tested random forest with square root the number of total features.
+```{r collapse=TRUE}
+# Create the Sqrt Random Forest Model
+
+
+# keep track of the best f1_score to compare later
+best_f1_forest_sqrt <- NULL
+best_f1_value <- -1
+
+# create a data frame to keep track of the metrics for each model
+score_data_forest_sqrt <- data.frame()
+
+# define the different tree numbers we want to try
+tree_nums <- c(1, 5, 10, 50, 100, 200, 500)
+
+# loop over the different tree numbers
+suppressMessages( # suppress the message: 'Registered s3 methods overwritten by html.tools'
+for (tree_num in tree_nums) {
+  # Train the Sqrt Random Forest Model
+  forest_sqrt_model <- randomForest(Life.expectancy ~ ., data = train_data, mtry= sqrt(num_features), ntree = tree_num)
+  
+  # Calculate metrics for the Sqrt Random Forest Model
+  forest_sqrt_metrics <- calculate_metrics(forest_sqrt_model, test_data)
+  
+  # Append results to the data frame
+  score_data_forest_sqrt <- rbind(score_data_forest_sqrt, data.frame(
+    tree_num = as.factor(tree_num),
+    metric_type = names(forest_sqrt_metrics),
+    metric_value = forest_sqrt_metrics
+  ))
+  
+  # Check if F1 score is better than the current best
+  f1_score_value <- forest_sqrt_metrics["f1_score"]
+  if (length(f1_score_value) > 0 && f1_score_value > best_f1_value) {
+    best_f1_forest_sqrt <- forest_sqrt_model
+    best_f1_value <- f1_score_value
+  }
+}
+)
+
+# Add the model with best F1 to the data frame
+metrics_best_f1_forest_sqrt <- calculate_metrics(best_f1_forest_sqrt, test_data)
+score_data_tree <- rbind(score_data_tree, data.frame(
+  tree_type = "Forest_sqrt",
+  metric_type = names(metrics_best_f1_forest_sqrt),
+  metric_value = metrics_best_f1_forest_sqrt
+))
+
+
+# Create separate bar graphs for each metric
+ggplot(score_data_forest_sqrt, aes(x = tree_num, y = metric_value, fill = tree_num)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(x = tree_num, y = metric_value, label = sprintf("%.3f", metric_value)), 
+            position = position_dodge(width = 0.9), vjust = -0.5, inherit.aes = FALSE) +
+  labs(title = "Model Evaluation Metrics - Random Forest with sqrt(num of features) with different Number of Trees", x = "Number of Trees", y = "Metric Value") +
+  theme_minimal() +
+  facet_wrap(~metric_type, scales = "free_y", strip.position = "bottom") +
+  coord_cartesian(ylim = c(0, 1))
+```
+The resulting graphs reveal an accuracy of 80.5% and an F1 score of 78.1%, almost equal to those of the logarithmic random forest, as both metrics start to plateau.
+
+##### Boosting
+
+Boosting is another ensemble technique which is based on the concept of empowering weak individual learners by fitting those simple models and altering the weight of incorrect classifications as more models are fit sequentially. The final aggregation of results is the combination of those weak learners that are converted into a better performing model.
+
+As the boosting algorithm requires the data input in the form of a matrix rather than a data frame, we defined the following function to deal with this inconsistency.
+```{r collapse=TRUE}
+# Calculates the metrics (accuracy, precision, recall, f1_score) for the given boosting model
+calculate_metrics_boosting <- function(model, test_data) {
+  features_test <- test_data[, !names(test_data) %in% "Life.expectancy"]
+  predictions <- predict(boosting_model, as.matrix(features_test))
+  predictions <- round(predictions)
+  
+  levels <- unique(c(predictions, test_data$Life.expectancy))
+  predictions <- factor(predictions, levels = levels)
+  actual_labels <- factor(test_data$Life.expectancy, levels = levels)
+  
+  conf_matrix <- confusionMatrix(predictions, actual_labels)
+  
+  accuracy <- conf_matrix$overall["Accuracy"]
+  
+  precision <- conf_matrix$byClass[,"Precision"]
+  recall <- conf_matrix$byClass[,"Sensitivity"]
+  f1_score <- conf_matrix$byClass[,"F1"]
+  
+  # Calculate average in case there are multiple values for the metrics
+  precision <- mean(precision, na.rm = TRUE)
+  recall <- mean(recall, na.rm = TRUE)
+  f1_score <- mean(f1_score, na.rm = TRUE)
+  
+  
+  
+  
+   return(c(accuracy, precision = precision, recall = recall, f1_score = f1_score))
+}
+```
+
+We then referenced the above function to test boosting and graphed the resulting metrics of accuracy, precision, recall, and F1 score.
+```{r collapse=TRUE}
+# Create the boosting decision tree model
+
+
+# keep track of the best f1_score to compare later
+best_f1_boosting <- NULL
+best_f1_value <- -1
+
+
+# create a data frame to keep track of the metrics for each model
+score_data_boosting <- data.frame()
+
+# define the different learning rates we want to try
+learning_rates <- c(0.001, 0.005, 0.01, 0.05, 0.1, 0.2)
+
+
+# Loop over each learning rate
+for (learning_rate in learning_rates) {
+  # Train the Boosting model
+  boosting_model <- xgboost(data = as.matrix(train_data[, -which(names(train_data) == "Life.expectancy")]), 
+                       label = train_data$Life.expectancy, 
+                       nrounds = 1000,
+                       eta = learning_rate,
+                       verbose = FALSE)
+  
+  
+  
+  # Calculate metrics for the Boosting Model
+  boosting_metrics <- calculate_metrics_boosting(boosting_model, test_data)
+  
+  
+  # Append results to the data frame
+  score_data_boosting <- rbind(score_data_boosting, data.frame(
+    learning_rate = as.factor(learning_rate),
+    metric_type = names(boosting_metrics),
+    metric_value = boosting_metrics
+  ))
+  
+  # Check if F1 score is better than the current best
+  f1_score_value <- boosting_metrics["f1_score"]
+  if (length(f1_score_value) > 0 && f1_score_value > best_f1_value) {
+    best_f1_boosting <- boosting_model
+    best_f1_value <- f1_score_value
+  }
+}
+
+# Add the model with best F1 to the data frame
+metrics_best_f1_boosting <- calculate_metrics_boosting(best_f1_boosting, test_data)
+score_data_tree <- rbind(score_data_tree, data.frame(
+  tree_type = "boosting",
+  metric_type = names(metrics_best_f1_boosting),
+  metric_value = metrics_best_f1_boosting
+))
+
+
+# Create separate bar graphs for each metric
+ggplot(score_data_boosting, aes(x = learning_rate, y = metric_value, fill = learning_rate)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(x = learning_rate, y = metric_value, label = sprintf("%.3f", metric_value)), 
+            position = position_dodge(width = 0.9), vjust = -0.5, inherit.aes = FALSE) +
+  labs(title = "Model Evaluation Metrics - Boosting with Different Number of Trees", x = "Number of Trees", y = "Metric Value") +
+  theme_minimal() +
+  facet_wrap(~metric_type, scales = "free_y", strip.position = "bottom") +
+  coord_cartesian(ylim = c(0, 1))
+```
+Accuracy reaches a maximum value of 77.9% and F1 score plateaus at a value of 76% when the learning rate is set to 0.1, which are less favorable results than those of random forest.
+
+#### Decision Tree Results Aggregation
+
+For better visualization, we graphed the results of each of the different methods and techniques below.
+```{r collapse=TRUE}
+# compare each metric between the best model of each tree type
+
+ggplot(score_data_tree, aes(x = tree_type, y = metric_value, fill = tree_type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(x = tree_type, y = metric_value, label = sprintf("%.3f", metric_value)), 
+            position = position_dodge(width = 0.9), vjust = -0.5, inherit.aes = FALSE) +
+  labs(title = "Model Evaluation Metrics - Comparing the different tree metrics", x = "Tree Type", y = "Metric Value") +
+  theme_minimal() +
+  facet_wrap(~metric_type, scales = "free_y", strip.position = "bottom") +
+  coord_cartesian(ylim = c(0, 1))
+```
+The above graphs summarize the metrics of each technique, revealing a maximum accuracy of 80.5% and maximum F1 score of 78.1% for the square root random forest model.
+A simple decision tree, though simple to interpret, lags behind its other counterparts in terms of accuracy and F1 score, exhibiting a minimum of 66.3% and 64.5% respectively.
+
+### Support Vector Machine (SVM)
+
+As we're dealing with a classification among 9 different classes (Incredibly low, Very low, Low, Below average, Average, Above average, High, Very high, and Incredibly high), we've opted to test the extended SVM using both polynomial and radial kernels.
+
+#### Polynomial Kernels
+
+The following graphs visualize the results for different polynomial kernels, of degrees ranging from 1 to 9.
+```{r collapse=TRUE}
+# Fit SVM models with different polynomial kernels
+score_data_poly <- data.frame()
+
+suppressWarnings(suppressMessages(
+for (i in 1:9) {
+  try(model_poly <- svm(Life.expectancy ~ ., data = train_data, type = "C-classification", kernel = "polynomial", degree = i, iter.max = 100000), silent=TRUE)
+  
+  # Calculate metrics for the polynomial model
+  metrics_poly <- calculate_metrics(model_poly, test_data, FALSE)
+  
+  # Append results to the data frame
+  score_data_poly <- rbind(score_data_poly, data.frame(
+    used_kernels = paste("Poly", i),
+    metric_type = rep(c("Accuracy", "Precision", "Recall", "F1 Score"), each = 1),
+    metric_value = rep(metrics_poly, each = 1)
+  ))
+}
+))
+
+# Create separate bar graphs using ggplot2 for each metric
+ggplot(score_data_poly, aes(x = used_kernels, y = metric_value, fill = metric_type, group = metric_type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(x = used_kernels, y = metric_value, label = sprintf("%.3f", metric_value)), 
+            position = position_dodge(width = 0.9), vjust = -0.5, inherit.aes = FALSE) +
+  labs(title = "Model Evaluation Metrics - Polynomial Kernels Only", x = "Used Kernels", y = "Metric Value") +
+  theme_minimal() +
+  facet_wrap(~metric_type, scales = "free_y", strip.position = "bottom") +
+  coord_cartesian(ylim = c(0, 1))
+```
+As represent above, the 3^{rd} degree polynomial exhibits the highest accuracy of 66.8% and F1 score of 64.6%, indicating that it is the most suitable among the tested degrees for our data set.
+
+After realizing the most suitable polynomial kernel for our data set, we tested different cost values for that model in an attempt to tune the cost hyper-parameter via cross-validation.
+Note that we had first attempted to run 5-fold cross-validation across the entire training data set, but after waiting for over 4 hours, the execution was still incomplete. That is why we opted to tune our hyper-parameters on just a subset of our training data.
+```{r collapse=TRUE}
+
+tune_data <- train_data[1:100, ]
+# Set up the parameter grid for polynomial kernel with a fixed scale
+param_grid_poly <- expand.grid(
+  C = c(1, 10, 100),  # (cost)
+  degree = c(2, 3, 4, 5),  # (Degree)
+  scale = 1  # Fixed scale value
+)
+
+# Define the control parameters for training
+ctrl_poly <- trainControl(
+  method = "cv",  # Cross-validation
+  number = 5,      # Number of folds
+  search = "grid"  # Use grid search for hyperparameter tuning
+)
+
+# Train the SVM model with a polynomial kernel and hyperparameter tuning
+svm_model_poly <- train(
+  Life.expectancy ~ .,
+  data = tune_data,
+  method = "svmPoly",  # Use polynomial kernel
+  tuneGrid = param_grid_poly,  # Use the specified parameter grid
+  trControl = ctrl_poly
+)
+
+# Display the best tuning parameters for the polynomial model
+best_params_poly <- svm_model_poly$bestTune
+print(best_params_poly)
+
+
+# Evaluate the polynomial model on the test set
+metrics_poly <- calculate_metrics(svm_model_poly, test_data)
+print(metrics_poly)
+```
+The above results show that the most suitable cost for the selected data is equal to 1.
+
+#### Radial Kernels
+
+After testing different degrees for polynomial kernels, we then started testing radial kernels with various gamma values ranging from 0.1 to 10. The following graphs visualize the different metrics for each value of gamma.
+```{r collapse=TRUE}
+# Different Gamma values for radial
+
+gamma_values <- c(0.1, 0.5, 1, 2, 3, 5, 10)
+
+# Create an empty data frame to store the results
+score_data_radial <- data.frame()
+
+# Loop through different gamma values for the radial kernel
+for (gamma in gamma_values) {
+  # Fit SVM model with radial kernel
+  model_radial <- svm(Life.expectancy ~ ., data = train_data, type = "C-classification", kernel = "radial", gamma = gamma)
+  
+  # Calculate metrics for the radial model
+  metrics_radial <- calculate_metrics(model_radial, test_data, FALSE)
+  
+  # Append results to the data frame
+  score_data_radial <- rbind(score_data_radial, data.frame(
+    gamma = as.factor(gamma),
+    metric_type = rep(c("Accuracy", "Precision", "Recall", "F1 Score"), each = 1),
+    metric_value = rep(metrics_radial, each = 1),
+    kernel = "Radial"
+  ))
+}
+
+
+# Create separate bar graphs using ggplot2 for each metric
+ggplot(score_data_radial, aes(x = gamma, y = metric_value, fill = gamma)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(x = gamma, y = metric_value, label = sprintf("%.3f", metric_value)), 
+            position = position_dodge(width = 0.9), vjust = -0.5, inherit.aes = FALSE) +
+  labs(title = "Model Evaluation Metrics - Radial Kernel", x = "Gamma", y = "Metric Value") +
+  theme_minimal() +
+  facet_wrap(~metric_type, scales = "free_y", strip.position = "bottom") +
+  coord_cartesian(ylim = c(0, 1))
+```
+As demonstrated in the above charts, a gamma value of 4 shows the highest accuracy (81.9%) and second highest F1 score (77.9%) which is only slightly less than that of value 3 (78%) of accuracy 81.7%. Thus, a gamma value of 2 seems to be the most suitable choice among the tested values.
+
+After we've distinguished the most suitable radial model for our data set among those tested, we then implemented cross-validation to tune the cost hyper-parameter for the radial-kernel SVM.
+Similarly to polynomial kernels, note that the hyper-parameter tuning ran for too long, so we opted to terminate the run and decrease the number of observations on which it runs 5-fold cross-validation.
+```{r collapse=TRUE}
+# Set up the parameter grid
+param_grid <- expand.grid(
+  C = c(1, 10, 100),  # (cost)
+  sigma = c(0.1, 1, 2, 10) # (gamma)
+)
+
+# Define the control parameters for training
+ctrl <- trainControl(
+  method = "cv",  # Cross-validation
+  number = 5,      # Number of folds
+  search = "grid"  # Use grid search for hyperparameter tuning
+)
+
+# Train the SVM model with hyperparameter tuning
+svm_model <- train(
+  Life.expectancy ~ .,
+  data = tune_data,
+  method = "svmRadial",  # Use radial kernel
+  tuneGrid = param_grid,  # Use the specified parameter grid
+  trControl = ctrl
+)
+
+# Display the best tuning parameters
+best_params <- svm_model$bestTune
+print(best_params)
+
+# Evaluate the model on the test set
+metrics <- calculate_metrics(svm_model, test_data)
+print(metrics)
+```
+The above results show that the most suitable value for the cost hyper-parameter for radial-kernel SVM is 10.
+
+## Unsupervised Learning
+
+Despite having the output variable in our data set, we still opted for unsupervised learning methods attempting to discover new insights we might have missed by limiting ourselves to supervised learning methods.
+
+### Clustering
+
+After that, we opted to go for clustering as our unsupervised learning approach to build predictive models that can further analyze our data and understand their significance when it comes to predicting life expectancy. We will delve deep into K-means Clustering as well as Hierarchical clustering. 
+
+#### K-Means Clustering
+
+A k-means cluster is an approach that deals with partitioning data into multiple distinct clusters (groups) based on similarities among the observations. We do not initially know the optimal number of clusters, hence the name "unsupervised learning". The power of this method comes with its ability to accurately classify any random observation into its correct cluster. That is why the clusters must be distinct from one another.
+
+We started by extracting our features, which in this case are our PCA components stored in `new_data`.
+
+```{r collapse=TRUE}
+# Extract features (excluding the 'Life.expectancy' column which is the target variable)
+new_data <- as.data.frame(new_data)
+features <- new_data[, -1]
+```
+
+Next, we defined a function called `rss` which would return the sum of all squares within a data set given any k amount of clusters. 
+
+```{r collapse=TRUE}
+# Function to calculate total within-cluster sum of squares
+rss <- function(k) {
+  kmeans_model <- kmeans(features, centers = k, nstart = 50)
+  return(sum(kmeans_model$withinss))
+}
+```
+
+After this step, we wanted to know which k amount of clusters was best for our data set. In other words, we sought to identify which k provided us with the least sum of squares for classification.
+
+We chose to run our algorithm on the first 9 values of k.
+
+```{r collapse=TRUE}
+# Determine the range of clusters to consider
+k_values <- 1:9
+
+# Apply the function to each value of k
+rss_values <- sapply(k_values, rss)
+```
+
+Then, we proceeded to plot our results of every k on a bar plot to visualize how the change of k would change the output sum of squares.
+
+To determine the optimal k in our case, we followed the elbow point technique.
+
+We first defined a function that finds the intersection of any 2 lines.
+
+```{r collapse=TRUE}
+find_intersection <- function(a1, b1, a2, b2) {
+  x_intersect <- (b2 - b1) / (a1 - a2)
+  y_intersect <- a1 * x_intersect + b1
+  return(c(x_intersect, y_intersect))
+}
+```
+
+After that, we plotted our results into an elbow plot to display the change of sum of squares as a function of k values. Then, we drew 2 tangents, the first passes through the first 2 points of the curve, the second passes through the last 2 points of the curve.
+
+
+Finally, using our previously defined function `intersection_point()`, we found the optimal value of k for our clusters (marked in purple) which in this case is 2.6 ≈ 3.
+```{r collapse=TRUE}
+# Plot the elbow plot
+plot(k_values, rss_values, type = "b", pch = 19, frame = FALSE, 
+     xlab = "Number of Clusters (k)", ylab = "Sum of Squares",
+     main = "Elbow Method for Optimal k in K-means Clustering")
+
+# Draw a line passing through the first two points
+abline(a = rss_values[1] - k_values[1] * (rss_values[2] - rss_values[1]) / (k_values[2] - k_values[1]), 
+       b = (rss_values[2] - rss_values[1]) / (k_values[2] - k_values[1]), col = "green", lty = 2)
+
+# Draw a line passing through the last two points
+abline(a = rss_values[length(k_values) - 1] - k_values[length(k_values) - 1] * (rss_values[length(k_values)] - rss_values[length(k_values) - 1]) / (k_values[length(k_values)] - k_values[length(k_values) - 1]), 
+       b = (rss_values[length(k_values)] - rss_values[length(k_values) - 1]) / (k_values[length(k_values)] - k_values[length(k_values) - 1]), col = "orange", lty = 2)
+
+# Find the intersection point
+intersection_point <- find_intersection(
+  (rss_values[2] - rss_values[1]) / (k_values[2] - k_values[1]), 
+  rss_values[1] - k_values[1] * (rss_values[2] - rss_values[1]) / (k_values[2] - k_values[1]), 
+  (rss_values[length(k_values)] - rss_values[length(k_values) - 1]) / (k_values[length(k_values)] - k_values[length(k_values) - 1]), 
+  rss_values[length(k_values) - 1] - k_values[length(k_values) - 1] * (rss_values[length(k_values)] - rss_values[length(k_values) - 1]) / (k_values[length(k_values)] - k_values[length(k_values) - 1])
+)
+
+intersection_point
+
+# Draw a vertical line at the intersection point
+abline(v = intersection_point[1], col = "purple", lty = 2)
+
+```
+
+#### Hierarchical Clustering
+
+Hierarchical clustering, or H-clust, is another unsupervised learning approach that we have developed. The main difference between this approach and K-means clustering is that, here, we do not need to pre-specify the number of clusters for our data set.
+
+Instead, this algorithm works in a bottom-up fashion. It other words, it starts by comparing the individual observations and computes their degree of similarity. These observations then fuse at a certain point with other observations, to eventually give us a dendrogram (tree-based representation) as a means of visualization for our data.
+
+As fusion takes longer to happen (more height in the tree), the sets of observations are more distinct from one another. This can help us identify relationships between observations and gives us the liberty to choose the number of clusters for our data set based on the height coordinate we choose to split our dendrogram (horizontal line).
+
+To build this model, Our first step would be to extract the features which are represented by our PCA components and actually building the tree.
+It is also important to note that we opted to test different types of linkages while building this model.
+
+```{r collapse=TRUE}
+# Extract features (excluding the 'Life.expectancy' column which is the target variable)
+new_data <- as.data.frame(new_data)
+features <- new_data[, -1]
+```
+
+We then proceeded to build the h-clust and split the dendrogram into `6` clusters (6 is our k of choice).
+
+```{r collapse=TRUE}
+# Perform hierarchical clustering
+hierarchical_model <- hclust(dist(features))
+# Cut the dendrogram to obtain k clusters
+cut_tree_result <- cutree(hierarchical_model, k = 6)
+```
+
+After that, we used this clustering approach to classify our entire data set.
+
+```{r collapse=TRUE}
+# Add hierarchical cluster assignments to the original dataset
+data_clustered_hierarchical <- cbind(features, Cluster = as.factor(cut_tree_result))
+```
+
+Now that classification is complete, we plotted the results for visualization.
+
+We first plotted the observations in the form of a scatter plot, and then proceeded to visualize the dendrogram.
+
+We must note that, in both plots, we only used 2 PCA components to provide visualization because it is not feasible to run the algorithm in 9 dimensions (9 being the number of principle components). That is why there is no proper distinction of the visualized clusters as they seem to overlap.
+
+Here is the scatter plot visualization:
+```{r collapse=TRUE}
+# Visualize the hierarchical clustering results
+plot(data_clustered_hierarchical[, c("PC1", "PC2")], col = data_clustered_hierarchical$Cluster, pch = 16, main = "Hierarchical Clustering of Your Data")
+legend("topright", legend = paste("Cluster", unique(cut_tree_result)), col = unique(cut_tree_result), pch = 16)
+```
+
+Here is the dendrogram visualization:
+
+```{r collapse=TRUE}
+# Visualize the hierarchical clustering tree with colored rectangles for clusters
+plot(hierarchical_model, main = "Hierarchical Clustering Dendrogram", xlab = "")
+rect.hclust(hierarchical_model, k = 9, border = 2:6)
+```
+
+We also wanted to show the other types of linkages that can be employed for this model to perform a brief comparison on which is better.
+
+All following steps are the same as before:
+
+```{r collapse=TRUE}
+# Extract features (excluding the 'Life.expectancy' column which is the target variable)
+features <- new_data[, -1]
+
+
+# Using single method
+linkage_method <- "single"
+
+# Perform hierarchical clustering
+hierarchical_model <- hclust(dist(features), method = linkage_method)
+
+# Cut the dendrogram to obtain k clusters
+cut_tree_result <- cutree(hierarchical_model, k = 6)
+
+# Add hierarchical cluster assignments to the original dataset
+data_clustered_hierarchical <- cbind(features, Cluster = as.factor(cut_tree_result))
+
+# Visualize the hierarchical clustering results
+plot(data_clustered_hierarchical[, c("PC1", "PC2")], col = data_clustered_hierarchical$Cluster, pch = 16, main = paste("Hierarchical Clustering of the Data (Linkage Method: ", linkage_method, ")"))
+legend("topright", legend = paste("Cluster", unique(cut_tree_result)), col = unique(cut_tree_result), pch = 16)
+
+# Visualize the hierarchical clustering tree with colored rectangles for clusters
+plot(hierarchical_model, main = paste("Hierarchical Clustering Dendrogram (Linkage Method: ", linkage_method, ")"), xlab = "")
+rect.hclust(hierarchical_model, k = 9, border = 2:6)
+
+
+
+
+# Using complete method
+linkage_method <- "complete"
+
+# Perform hierarchical clustering
+hierarchical_model <- hclust(dist(features), method = linkage_method)
+
+# Cut the dendrogram to obtain k clusters
+cut_tree_result <- cutree(hierarchical_model, k = 6)
+
+# Add hierarchical cluster assignments to the original dataset
+data_clustered_hierarchical <- cbind(features, Cluster = as.factor(cut_tree_result))
+
+# Visualize the hierarchical clustering results
+plot(data_clustered_hierarchical[, c("PC1", "PC2")], col = data_clustered_hierarchical$Cluster, pch = 16, main = paste("Hierarchical Clustering of the Data (Linkage Method: ", linkage_method, ")"))
+legend("topright", legend = paste("Cluster", unique(cut_tree_result)), col = unique(cut_tree_result), pch = 16)
+
+# Visualize the hierarchical clustering tree with colored rectangles for clusters
+plot(hierarchical_model, main = paste("Hierarchical Clustering Dendrogram (Linkage Method: ", linkage_method, ")"), xlab = "")
+rect.hclust(hierarchical_model, k = 9, border = 2:6)
+
+
+
+
+
+
+# Using average method
+linkage_method <- "average"
+
+# Perform hierarchical clustering
+hierarchical_model <- hclust(dist(features), method = linkage_method)
+
+# Cut the dendrogram to obtain k clusters
+cut_tree_result <- cutree(hierarchical_model, k = 6)
+
+# Add hierarchical cluster assignments to the original dataset
+data_clustered_hierarchical <- cbind(features, Cluster = as.factor(cut_tree_result))
+
+# Visualize the hierarchical clustering results
+plot(data_clustered_hierarchical[, c("PC1", "PC2")], col = data_clustered_hierarchical$Cluster, pch = 16, main = paste("Hierarchical Clustering of the Data (Linkage Method: ", linkage_method, ")"))
+legend("topright", legend = paste("Cluster", unique(cut_tree_result)), col = unique(cut_tree_result), pch = 16)
+
+# Visualize the hierarchical clustering tree with colored rectangles for clusters
+plot(hierarchical_model, main = paste("Hierarchical Clustering Dendrogram (Linkage Method: ", linkage_method, ")"), xlab = "")
+rect.hclust(hierarchical_model, k = 9, border = 2:6)
+
+
+
+
+
+
+
+# Using centroid method
+linkage_method <- "centroid"
+
+# Perform hierarchical clustering
+hierarchical_model <- hclust(dist(features), method = linkage_method)
+
+# Cut the dendrogram to obtain k clusters
+cut_tree_result <- cutree(hierarchical_model, k = 6)
+
+# Add hierarchical cluster assignments to the original dataset
+data_clustered_hierarchical <- cbind(features, Cluster = as.factor(cut_tree_result))
+
+# Visualize the hierarchical clustering results
+plot(data_clustered_hierarchical[, c("PC1", "PC2")], col = data_clustered_hierarchical$Cluster, pch = 16, main = paste("Hierarchical Clustering of the Data (Linkage Method: ", linkage_method, ")"))
+legend("topright", legend = paste("Cluster", unique(cut_tree_result)), col = unique(cut_tree_result), pch = 16)
+
+# Visualize the hierarchical clustering tree with colored rectangles for clusters
+plot(hierarchical_model, main = paste("Hierarchical Clustering Dendrogram (Linkage Method: ", linkage_method, ")"), xlab = "")
+rect.hclust(hierarchical_model, k = 9, border = 2:6)
+```
+
+Among the different types of linkages, complete and average linkages result in a more balanced dendrogram than their single linkage alternative, which reveals a stair-like structure. The centroid linkage also reveals a stair-like structure when tested on our data set, which renders it less balanced, and consquently, less favorable, than its complete and average alternatives.
+
+# Results Aggregation & Interpretation
+
+Among the different tree-based methods, the square root random forest proved to be the most suitable as it revealed both highest accuracy and highest F1 score of 80.5% and 78.1%, respectively.
+
+As for polynomial-kernel SVM, it revealed a maximum accuracy and F1 score of 66.8% and 64.6%, respectively, at a degree of 3, while the radial-kernel SVM revealed maximum accuracy of 81.9% and a corresponding F1 score of 77.9% at a gamma value of 2.
+
+Among those three, the random forest seems to best predict the life expectancy of a country given the different features.
+
+# Different Split Percentages
+
+Referring to feedback we've received on previous work of ours, we decided to test our models on different split percentages. A follow-up report will be submitted to WHO at a later date exploring the details of every model and further interpreting the different results for each split.
+As the hyper-parameter tuning and unsupervised learning methods are not affected by the different split percentages, we won't be displaying their results in this section to avoid redundancy. This section mainly focuses on decision trees and SVM with polynomial and radial kernels.
+This report dealt with the results of splitting our main data set into 80% training and 20% test.
+
+## 70% (Training) / 30% (Test)
+
+### Decision Trees
+
+- The simple un-pruned decision tree reveals an accuracy of 63.1% and F1 score of 59.5%.
+- The pruned decision tree reveals a maximum accuracy of 64.9% and maximum F1 score of 61.1% at a complexity of 0.6.
+- The bagging ensemble method improves accuracy and F1 score to a maximum of 79.4% and 76.9%, respectively, at 200 trees.
+- The logarithmic random forest improves accuracy and F1 score to a maximum of 79.2% and 75.7%, respectively, at 500 trees.
+- The square root random forest improves accuracy and F1 score to a maximum of 80% and 75.9%, respectively, at 200 trees.
+- The boosting ensemble method improves accuracy and F1 score to a maximum of 77.1% and 74.6%, respectively, at a learning rate of 0.1.
+
+### Support Vector Machine (SVM)
+
+- The polynomial SVM shows a maximum accuracy of 66.9% and a maximum F1 score of 63.5% at a degree of 3.
+- The radial SVM shows a maximum accuracy of 78.8% and a maximum F1 score of 73.9% at a gamma value of 1.
+
+## 60% (Training) / 40% (Test)
+
+### Decision Trees
+
+- The simple un-pruned decision tree reveals an accuracy of 61% and F1 score of 55.9%.
+- The pruned decision tree reveals a maximum accuracy of 64.4% and maximum F1 score of 61.1% at a complexity of 0.6.
+- The bagging ensemble method improves accuracy and F1 score to a maximum of 78.3% and 73.5%, respectively, at 200 trees.
+- The logarithmic random forest improves accuracy and F1 score to a maximum of 78.1% and 71.9%, respectively, at 500 trees.
+- The square root random forest improves accuracy and F1 score to a maximum of 78% and 71.1%, respectively, at 200 trees.
+- The boosting ensemble method improves accuracy and F1 score to a maximum of 77.2% and 73.8%, respectively, at a learning rate of 0.1.
+
+### Support Vector Machine (SVM)
+
+- The polynomial SVM shows a maximum accuracy of 63.8% and a maximum F1 score of 59.7% at a degree of 3.
+- The radial SVM shows a maximum accuracy of 78.8% and a maximum F1 score of 73.9% at a gamma value of 1.
+
+## Results Aggregation
+
+The different splits reveal that, as a general trend, the different metrics may shift from the one split to the next, but the same interpretation holds across different splits.
+An example of such is the SVM's polynomial of degree 3 revealing highest accuracy and F1 score among its candidate counterparts for every split.
+
+# Conclusion
+
+From trees, to SVM, and unsupervised learning, this project truly had it all. We wrap up this report by summarizing our different steps along the way. Our main purpose behind this project was to provide WHO with diverse ML models that they can use with ease to predict the life expectancy of any country by simply feeding our algorithms its set of features. To make that a reality, we went for a fruitful data set, explored and visualized the distribution of the data, and then proceeded to process our data set for efficient model development. We standardized our data, split it into training and test sets, and ran a PCA algorithm on our features.
+
+Finally, we approached our project from an unsupervised perspective and went for clustering. These types of models can be very useful for better understanding our data as well as the significance of our features in providing strong prediction power. We first built a K-means Clustering model and found that a k of 3 was the optimal amount of clusters for our data since it provided us with the lowest sum of squares (using the elbow method). 
+
+Last but not least, we developed a hierarchical clustering model as our second unsupervised learning technique. The power of this model resides with its ability to compare all the observations together, fuse them into different groups, compare these different groups together, and eventually fuse all the observations together. This liberates us from the need to pre-specify k before running the algorithm, as we can choose our desired k after the algorithm is done and the dendrogram is visualized. We also provided a 2-dimensional visualization of the various clusters obtained from this model.
+
+Developing different models for WHO was definitely a challenging, yet fun and interesting. The project we were assigned may have a step-up from the one MAR had tasked us with, but as the challenges have increased in difficulty and complexity, so has our knowledge and experience. The only struggle we couldn't maneuver around as swiftly as we would have hoped was the fact that some parts of the code would take more than expected to finish execution. Given our limited resources, we didn't have enough time, or computational power, to complete their execution.
